@@ -5,7 +5,7 @@ import json
 import logging
 logger = logging.getLogger('')
 if not logger.hasHandlers():
-    logging.basicConfig(filename='/home/u0/Docs/my_coding_projects_2023/Notification_reader_TTS/logs/debug.log', level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+    logging.basicConfig(filename='*your path*/Notification_reader_TTS/logs/debug.log', level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
     console = logging.StreamHandler()
     console.setLevel(logging.DEBUG)
     logger.addHandler(console)
