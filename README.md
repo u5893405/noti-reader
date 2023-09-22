@@ -8,3 +8,7 @@ Originally it is using Coqui TTS with VITS model for english, and Silero TTS for
 There is no settings for TTS engines yet, but it will the next thing in development after advanced filters feature. 
 
 Right now the advanced filters in GUI are in the middle of developing, so it doesn't fully work yet.
+
+required software:
+https://github.com/coqui-ai/TTS
+https://github.com/snakers4/silero-models
