@@ -10,6 +10,7 @@ There is no settings for TTS engines yet, but it will the next thing in developm
 Right now the advanced filters in GUI are in the middle of developing, so it doesn't fully work yet.
 
 required software:
+
 https://github.com/coqui-ai/TTS
 
 https://github.com/snakers4/silero-models
