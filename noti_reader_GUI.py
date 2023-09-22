@@ -1,11 +1,23 @@
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QPushButton, QLabel, QSlider, QFormLayout, QLineEdit, QCheckBox, QDialog, QGridLayout, QTableWidgetItem, QTableWidget, QHeaderView, QComboBox, QHBoxLayout
 from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot, QThread
 import sys
+import os
 import json
 import logging
 logger = logging.getLogger('')
 if not logger.hasHandlers():
-    logging.basicConfig(filename='*your path*/Notification_reader_TTS/logs/debug.log', level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+    # Determine the directory where this script resides
+    current_script_path = os.path.dirname(os.path.abspath(__file__))
+    
+    # Create a 'logs' directory if it doesn't exist
+    logs_dir_path = os.path.join(current_script_path, 'logs')
+    os.makedirs(logs_dir_path, exist_ok=True)
+    
+    # Create a log file within that directory
+    log_file_path = os.path.join(logs_dir_path, 'debug.log')
+    
+    # Configure logging
+    logging.basicConfig(filename=log_file_path, level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
     console = logging.StreamHandler()
     console.setLevel(logging.DEBUG)
     logger.addHandler(console)
