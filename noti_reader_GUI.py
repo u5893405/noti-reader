@@ -92,26 +92,15 @@ class AdvancedRuleDialog(QDialog):
         layout.addWidget(self.cancel_button)
 
         self.apply_button = QPushButton("Apply")
-        self.apply_button.clicked.connect(self.apply_and_close)
+        self.apply_button.clicked.connect(self.apply_and_close_advanced_rule)
         layout.addWidget(self.apply_button)
 
         self.setLayout(layout)
 
-    def apply_and_close(self):
-        print("DEBUG: apply_and_close() has been triggered.")
+
+    def apply_and_close_advanced_rule(self):
+        print("DEBUG: apply_and_close_advanced_rule() has been triggered.")
         try:
-            # Debug lines
-            print(f"DEBUG: self.parent(): {self.parent()}")
-            print(f"DEBUG: self.parent().thread: {self.parent().thread}")
-
-            if not isinstance(self.parent(), FilterSettingsDialog):
-                print("DEBUG: Parent is not of type FilterSettingsDialog.")
-                return
-
-            if not isinstance(self.parent().thread, NotificationThread):
-                print("DEBUG: Parent's thread is not of type NotificationThread.")
-                return
-            
             if_rule = {
                 "entry": self.if_combo_box.currentText(),
                 "condition": self.if_condition_combo_box.currentText(),
@@ -134,7 +123,10 @@ class AdvancedRuleDialog(QDialog):
             self.parent().advanced_rules[self.entry_index] = advanced_rule  
             
             source = self.source
-            self.parent().thread.reader.advanced_rules[source] = advanced_rule
+            print(f"DEBUG: Source for the advanced rule is {source}")
+            if source not in self.parent().thread.reader.advanced_rules:
+                self.parent().thread.reader.advanced_rules[source] = {}
+            self.parent().thread.reader.advanced_rules[source][self.entry_index] = advanced_rule
             self.parent().thread.reader.save_advanced_rules()
             
             self.advancedRuleSet.emit(self.entry_index, advanced_rule_json)
@@ -142,7 +134,6 @@ class AdvancedRuleDialog(QDialog):
             
             # Debug lines
             print(f"DEBUG: self.parent() type: {type(self.parent())}")  
-            print(f"DEBUG: self.parent().thread type: {type(self.parent().thread)}")  
             
         except AttributeError:
             print(f"DEBUG: Caught AttributeError. self.parent(): {self.parent()}, type: {type(self.parent())}")
@@ -152,6 +143,7 @@ class AdvancedRuleDialog(QDialog):
 class FilterSettingsDialog(QDialog):
     def __init__(self, parent=None):
         super(FilterSettingsDialog, self).__init__(parent)
+        self.thread = NotificationThread()
         layout = QGridLayout()
         layout.addWidget(QLabel("Reading Filter Settings"), 0, 0)
         self.advanced_rules = {}
@@ -209,10 +201,10 @@ class FilterSettingsDialog(QDialog):
         self.third_advanced_rule_button = QPushButton("Advanced")
         self.fourth_advanced_rule_button = QPushButton("Advanced")
 
-        self.first_advanced_rule_button.clicked.connect(lambda: self.show_advanced_rule_dialog(0))
-        self.second_advanced_rule_button.clicked.connect(lambda: self.show_advanced_rule_dialog(1))
-        self.third_advanced_rule_button.clicked.connect(lambda: self.show_advanced_rule_dialog(2))
-        self.fourth_advanced_rule_button.clicked.connect(lambda: self.show_advanced_rule_dialog(3))
+        self.first_advanced_rule_button.clicked.connect(lambda: self.show_advanced_rule_dialog_for_filter(0))
+        self.second_advanced_rule_button.clicked.connect(lambda: self.show_advanced_rule_dialog_for_filter(1))
+        self.third_advanced_rule_button.clicked.connect(lambda: self.show_advanced_rule_dialog_for_filter(2))
+        self.fourth_advanced_rule_button.clicked.connect(lambda: self.show_advanced_rule_dialog_for_filter(3))
 
         layout.addWidget(self.first_advanced_rule_button, 2, 3)
         layout.addWidget(self.second_advanced_rule_button, 3, 3)
@@ -231,7 +223,7 @@ class FilterSettingsDialog(QDialog):
         #self.adv_rule_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Fixed)
 
         self.apply_button = QPushButton('Apply')
-        self.apply_button.clicked.connect(self.apply_settings)
+        self.apply_button.clicked.connect(self.apply_filter_settings)
         print("DEBUG: Apply button connected to apply_and_close method.")
         layout.addWidget(self.apply_button, 6, 1)
 
@@ -284,25 +276,26 @@ class FilterSettingsDialog(QDialog):
         self.update_advanced_rule_labels()
 
     def update_adv_rule_table(self, source=None):
-        logging.debug(f"FilterSettingsDialog: Updating advanced rule table for source: {source}")  # Debug line
+        logging.debug(f"FilterSettingsDialog: Updating advanced rule table for source: {source}")  
         self.adv_rule_table.setRowCount(0)
 
         if source and source in self.parent().thread.reader.advanced_rules:
-            logging.debug(f"FilterSettingsDialog: Advanced rules found for source {source}.")  # Debug line
+            logging.debug(f"FilterSettingsDialog: Advanced rules found for source {source}.")  
             advanced_rules_for_source = self.parent().thread.reader.advanced_rules[source]
-            for idx, rule in enumerate(advanced_rules_for_source):
+            for idx, (entry_index, rule) in enumerate(advanced_rules_for_source.items()):
                 self.adv_rule_table.insertRow(idx)
                 self.adv_rule_table.setItem(idx, 0, QTableWidgetItem(rule['if']['condition']))
                 self.adv_rule_table.setItem(idx, 1, QTableWidgetItem(rule['then']['action']))
         else:
-            logging.debug(f"FilterSettingsDialog: No advanced rules found for source {source}.")  # Debug line
+            logging.debug(f"FilterSettingsDialog: No advanced rules found for source {source}.")  
             self.adv_rule_table.insertRow(0)
             self.adv_rule_table.setItem(0, 0, QTableWidgetItem("No advanced rules"))
 
 
 
+
     # Call update_rule_list when the dialog is shown
-    def show_and_exec(self):
+    def show_and_execute_filter_settings(self):
         self.update_rule_list()
         self.update_adv_rule_table()
         self.update_advanced_rule_labels()
@@ -323,23 +316,30 @@ class FilterSettingsDialog(QDialog):
         
         return {source: entries_to_read}       
 
-    def apply_settings(self):
+    def apply_filter_settings(self):
         logging.debug("FilterSettingsDialog: Applying settings.")
         new_rules = self.get_settings()
         self.parent().thread.reader.update_rules(new_rules)
 
         source = self.source_line_edit.text().strip()
-        # Use source as the key for advanced rules
+        # Updating only the source_rules, not touching advanced_rules here
         if source:
-            self.parent().thread.reader.advanced_rules[source] = self.advanced_rules.get(0, {})
-
-        # Deserialize the JSON string back to dictionary
-        deserialized_advanced_rules = {k: json.loads(v) for k, v in self.advanced_rules.items()}
-        self.parent().thread.reader.update_advanced_rules(deserialized_advanced_rules)
-            
+            advanced_rules_for_source = self.parent().thread.reader.advanced_rules.get(source, {})
+            if advanced_rules_for_source:
+                self.parent().thread.reader.advanced_rules[source] = advanced_rules_for_source
+            else:
+                # If there are no advanced rules for this source, ensure it doesn't exist in the dictionary
+                if source in self.parent().thread.reader.advanced_rules:
+                    del self.parent().thread.reader.advanced_rules[source]
+        
+        # Save advanced rules only if they exist
+        if self.parent().thread.reader.advanced_rules:
+            self.parent().thread.reader.save_advanced_rules()
+                
         self.update_rule_list()
         # Update UI
         self.update_advanced_rule_ui()
+
 
     def update_advanced_rule_ui(self):
         source = self.source_line_edit.text().strip()
@@ -358,23 +358,36 @@ class FilterSettingsDialog(QDialog):
                 checkbox.setEnabled(True)  # Enable checkbox
                 label.hide()
 
-
-    def show_advanced_rule_dialog(self, entry_index):
+    def show_advanced_rule_dialog_for_filter(self, entry_index):
         source = self.source_line_edit.text().strip()
+        print(f"DEBUG: Source obtained in FilterSettingsDialog: {source}")  # Debug log 1
         dialog = AdvancedRuleDialog(self)
-        dialog.entry_index = entry_index  # Pass the entry index to the advanced rule dialog
+        dialog.entry_index = entry_index
         dialog.source = source
-        dialog.advancedRuleSet.connect(self.set_advanced_rule)  # Connect to the new signal
+        print(f"DEBUG: dialog.source set to: {dialog.source}")  # Debug log 2
+        dialog.advancedRuleSet.connect(self.set_advanced_rule_for_filter)
         dialog.exec_()
-        self.update_advanced_rule_ui()  # Refresh the UI to reflect the new advanced rule
+        self.update_advanced_rule_ui()
 
-    def set_advanced_rule(self, entry_index, advanced_rule):
+
+    def set_advanced_rule_for_filter(self, entry_index, advanced_rule):
+        source = self.source_line_edit.text().strip()
+        print(f"DEBUG: Source set in FilterSettingsDialog: {source}")
+
+        if source not in self.parent().thread.reader.advanced_rules:
+            self.parent().thread.reader.advanced_rules[source] = {}
+        self.parent().thread.reader.advanced_rules[source][entry_index] = json.loads(advanced_rule)
+        self.parent().thread.reader.save_advanced_rules()
+
         self.advanced_rules[entry_index] = advanced_rule
-        self.update_adv_rule_table()
+        self.update_adv_rule_table(source)
         self.update_advanced_rule_labels()
         print(f"DEBUG: Updated advanced_rules: {self.advanced_rules}") 
 
     def update_advanced_rule_labels(self):
+        if not self.advanced_rules:
+            logging.debug("No advanced rules to save. Skipping.")
+            return
         source = self.source_line_edit.text().strip()
         if source in self.parent().thread.reader.advanced_rules:
             self.first_advanced_rule_label.show()
@@ -424,7 +437,7 @@ class App(QWidget):
     def show_reading_filter(self):  
         self.filter_settings_dialog = FilterSettingsDialog(parent=self)
         self.filter_settings_dialog.setWindowTitle("Reading Filter Settings")
-        self.filter_settings_dialog.show_and_exec()
+        self.filter_settings_dialog.show_and_execute_filter_settings()
 
     def start_tts(self):
         logging.debug("App: Starting TTS.")
