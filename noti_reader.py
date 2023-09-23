@@ -25,9 +25,6 @@ if not logger.hasHandlers():
     console.setLevel(logging.DEBUG)
     logger.addHandler(console)
 
-
-
-
 from omegaconf import OmegaConf
 from langdetect import detect
 from scipy.io.wavfile import write
@@ -48,7 +45,9 @@ class NotificationReader:
         self.model.to(self.device)
         logging.debug(f'TTS initialized with language: {self.language} and model ID: {self.model_id}')
         # Database for notification sources and their corresponding rules
-
+        current_script_path = os.path.dirname(os.path.abspath(__file__))
+        self.current_source = ''
+        self.advanced_rules_file_path = os.path.join(current_script_path, 'advanced_rules.json')
         self.json_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'source_rules.json')  # Absolute path
         print(f"DEBUG: JSON Path: {self.json_path}")  # Debug line
         self.advanced_rules = {}
@@ -84,20 +83,30 @@ class NotificationReader:
         self.advanced_rules[source] = advanced_rule
         self.save_advanced_rules()
 
-    def apply_advanced_rule(self, sequential_strings, rules):
+    def apply_advanced_rule(self, sequential_strings, source, rules):
         logging.debug("DEBUG: Applying advanced rules.")
-        for entry_index, advanced_rule in self.advanced_rules.items():
+        
+        if source not in self.advanced_rules:
+            logging.debug(f"DEBUG: No advanced rules for source {source}.")
+            return None, None  # No rules matched
+        
+        for entry_index, advanced_rule in self.advanced_rules[source].items():
             entry_index = int(entry_index)  # Convert the entry index to an integer
+            
             logging.debug(f"DEBUG: Advanced rule type: {type(advanced_rule)}")
             logging.debug(f"DEBUG: Advanced rule content: {advanced_rule}")
+            
             if int(entry_index) < len(sequential_strings):
                 text_to_check = sequential_strings[entry_index]
+                
                 logging.debug(f"DEBUG: Checking text {text_to_check} for advanced rules.")
+                
                 if_rule = advanced_rule.get('if', {})
                 condition = if_rule.get('condition', '')
                 value = if_rule.get('value', '')
                 
                 match = False
+                
                 if condition == 'contains word':
                     match = value in text_to_check.split()
                 elif condition == 'contains symbol':
@@ -111,12 +120,15 @@ class NotificationReader:
                 if match:
                     then_rule = advanced_rule.get('then', {})
                     action = then_rule.get('action', '')
+                    
                     logging.debug(f"DEBUG: Advanced rule match. Action: {action}.")
                     
                     if action in ['read', 'do not read']:
                         return action, then_rule.get('words', None)
+        
         logging.debug("DEBUG: No advanced rules applied.")
         return None, None  # No rules matched
+
  
 
     def start(self):
@@ -189,10 +201,11 @@ class NotificationReader:
                 logging.debug(f'Sequential strings: {sequential_strings}')
 
                 source = sequential_strings[0] if sequential_strings else ''
+                self.current_source = source
                 rules = self.source_rules.get(source, [0, 1])
 
                 # Apply advanced rules
-                advanced_action, advanced_words = self.apply_advanced_rule(sequential_strings, rules)
+                advanced_action, advanced_words = self.apply_advanced_rule(sequential_strings, source, rules)
                 if advanced_action is not None:
                     if advanced_action == 'read':
                         logging.debug("Reading text based on advanced rule.")
@@ -234,8 +247,9 @@ class NotificationReader:
     def load_advanced_rules(self):
         advanced_rules_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'advanced_rules.json')
         try:
-            with open("advanced_rules.json", 'r') as f:
-                self.advanced_rules = json.load(f)
+            if os.path.exists(self.advanced_rules_file_path):
+                with open(self.advanced_rules_file_path, 'r') as f:
+                    self.advanced_rules = json.load(f)
             logging.debug(f"Successfully loaded advanced rules: {self.advanced_rules}")
         except FileNotFoundError:
             self.advanced_rules = {}
@@ -247,7 +261,7 @@ class NotificationReader:
     def save_advanced_rules(self):
         advanced_rules_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'advanced_rules.json')
         try:
-            with open("advanced_rules.json", 'w') as f:
+            with open(self.advanced_rules_file_path, 'w') as f:
                 json.dump(self.advanced_rules, f)
             logging.debug("Successfully saved advanced rules.")
         except Exception as e:
