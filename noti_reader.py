@@ -83,30 +83,31 @@ class NotificationReader:
         self.advanced_rules[source] = advanced_rule
         self.save_advanced_rules()
 
-    def apply_advanced_rule(self, sequential_strings, source, rules):
-        logging.debug("DEBUG: Applying advanced rules.")
+    def apply_advanced_rule(self, sequential_strings, source, actions):
+        logging.debug("DEBUG: Entering apply_advanced_rule.")
         
         if source not in self.advanced_rules:
             logging.debug(f"DEBUG: No advanced rules for source {source}.")
-            return None, None  # No rules matched
+            return  # No rules matched
         
-        for entry_index, advanced_rule in self.advanced_rules[source].items():
-            entry_index = int(entry_index)  # Convert the entry index to an integer
-            
-            logging.debug(f"DEBUG: Advanced rule type: {type(advanced_rule)}")
-            logging.debug(f"DEBUG: Advanced rule content: {advanced_rule}")
-            
-            if int(entry_index) < len(sequential_strings):
+        logging.debug(f"DEBUG: Advanced rules exist for source {source}. Rules: {self.advanced_rules[source]}")
+        
+        for advanced_rule_entry in self.advanced_rules[source]:
+            entry_index = advanced_rule_entry["entry_index"]
+            advanced_rule = advanced_rule_entry["rule"]
+
+            logging.debug(f"DEBUG: Processing advanced_rule_entry {advanced_rule_entry}")
+
+            if entry_index < len(sequential_strings):
                 text_to_check = sequential_strings[entry_index]
-                
                 logging.debug(f"DEBUG: Checking text {text_to_check} for advanced rules.")
                 
                 if_rule = advanced_rule.get('if', {})
                 condition = if_rule.get('condition', '')
                 value = if_rule.get('value', '')
-                
+
                 match = False
-                
+
                 if condition == 'contains word':
                     match = value in text_to_check.split()
                 elif condition == 'contains symbol':
@@ -118,18 +119,23 @@ class NotificationReader:
                     match = len(text_to_check.split()) == int(value)
                 
                 if match:
+                    logging.debug(f"DEBUG: Condition matched. Processing actions.")
                     then_rule = advanced_rule.get('then', {})
                     action = then_rule.get('action', '')
-                    
+                    target_entry_str = then_rule.get('entry', str(entry_index))
+                    target_entry_index = int(re.search(r'\d+', target_entry_str).group()) - 1 if re.search(r'\d+', target_entry_str) else entry_index
+
                     logging.debug(f"DEBUG: Advanced rule match. Action: {action}.")
                     
                     if action in ['read', 'do not read']:
-                        return action, then_rule.get('words', None)
-        
-        logging.debug("DEBUG: No advanced rules applied.")
-        return None, None  # No rules matched
-
- 
+                        if target_entry_index < len(actions):
+                            actions[target_entry_index] = action
+                    elif action == 'read certain words':
+                        replacement_words = then_rule.get('value', '')
+                        if target_entry_index < len(sequential_strings):
+                            sequential_strings[target_entry_index] = replacement_words
+                            actions[target_entry_index] = 'read'
+        return actions
 
     def start(self):
         self.running = True
@@ -149,8 +155,10 @@ class NotificationReader:
                 f.write(text)
                 f.flush()
                 command = f'cat {f.name} | tts --text "{text}" --model_name "tts_models/en/vctk/vits" --speaker_idx p230 --out_path /tmp/tts_output.wav  --use_cuda USE_CUDA'
+                logging.debug(f'Executing TTS command: {command}')
                 subprocess.run(command, shell=True)
                 play_command = 'aplay /tmp/tts_output.wav'
+                logging.debug(f'Executing play command: {play_command}')
                 subprocess.run(play_command, shell=True)
         elif lang == 'ru':
             audio = self.model.apply_tts(text=text,
@@ -204,41 +212,39 @@ class NotificationReader:
                 self.current_source = source
                 rules = self.source_rules.get(source, [0, 1])
 
-                # Apply advanced rules
-                advanced_action, advanced_words = self.apply_advanced_rule(sequential_strings, source, rules)
-                if advanced_action is not None:
-                    if advanced_action == 'read':
-                        logging.debug("Reading text based on advanced rule.")
-                        if advanced_words:
-                            # Read only certain words
-                            self.read_text(' '.join([word for word in sequential_strings if word in advanced_words.split()]), 'en')
-                        else:
-                            # Read all words
-                            self.read_text(' '.join(sequential_strings), 'en')
-                    else:
-                        logging.debug("Skipping text based on advanced rule.")
-                        # Code to skip reading based on advanced rule
-                    continue  # Skip the rest of the loop iteration
+                # Initialize actions with 'do not read' first
+                actions = ['do not read'] * len(sequential_strings)
+
+                # Apply simple rules to populate actions
+                if rules:
+                    for i in rules:
+                        if i < len(actions):
+                            actions[i] = 'read'
+
+                # Apply advanced rules to update actions
+                self.apply_advanced_rule(sequential_strings, source, actions)
 
                 # Group text by language
                 grouped_text = {'en': [], 'ru': []}
-                
-                if rules:
-                    for i in rules:
-                        if i < len(sequential_strings):
-                            text_to_read = sequential_strings[i]
-                            detected_lang = detect(text_to_read)
-                            lang = 'ru' if detected_lang == 'ru' else 'en'
+
+                # Use the final actions array to decide what to read
+                for i, action in enumerate(actions):
+                    if i < len(sequential_strings):
+                        text_to_read = sequential_strings[i]
+                        detected_lang = detect(text_to_read)
+                        lang = 'ru' if detected_lang == 'ru' else 'en'
+
+                        if action == 'read':
                             grouped_text[lang].append(text_to_read)
 
-                    # Process each language group
-                    for lang, texts in grouped_text.items():
-                        if texts:
-                            combined_text = ', '.join(texts)
-                            logging.debug(f'Notification source: {source}')
-                            logging.debug(f'Final text to read: {combined_text}')
-                            logging.debug(f'Proceeding to TTS for language: {lang}.')
-                            self.read_text(combined_text, lang)
+                # Process each language group
+                for lang, texts in grouped_text.items():
+                    if texts:
+                        combined_text = ', '.join(texts)
+                        logging.debug(f'Notification source: {source}')
+                        logging.debug(f'Final text to read: {combined_text}')
+                        logging.debug(f'Proceeding to TTS for language: {lang}.')
+                        self.read_text(combined_text, lang)
                 else:
                     logging.debug(f'No rules found for source: {source}. Skipping.')
 
