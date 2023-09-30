@@ -1,5 +1,6 @@
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QPushButton, QLabel, QSlider, QFormLayout, QLineEdit, QCheckBox, QDialog, QGridLayout, QTableWidgetItem, QTableWidget, QHeaderView, QComboBox, QHBoxLayout
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QPushButton, QLabel, QSlider, QFormLayout, QLineEdit, QCheckBox, QDialog, QGridLayout, QTableWidgetItem, QTableWidget, QHeaderView, QComboBox, QHBoxLayout, QSplitter, QListWidget
 from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot, QThread
+from functools import partial
 import sys
 import os
 import json
@@ -66,6 +67,8 @@ class AdvancedRuleDialog(QDialog):
         if_condition_layout.addWidget(self.if_combo_box)
         if_condition_layout.addWidget(self.if_condition_combo_box)
         if_condition_layout.addWidget(self.if_value_edit)
+        self.if_label = QLabel("Condition:")
+        self.if_layout.addWidget(self.if_label)
 
         self.if_layout.addLayout(if_condition_layout)
         layout.addLayout(self.if_layout)
@@ -82,6 +85,8 @@ class AdvancedRuleDialog(QDialog):
         then_condition_layout.addWidget(self.then_combo_box)
         then_condition_layout.addWidget(self.then_action_combo_box)
         then_condition_layout.addWidget(self.then_value_edit)
+        self.then_label = QLabel("Action:")
+        self.then_layout.addWidget(self.then_label)
 
         self.then_layout.addLayout(then_condition_layout)
         layout.addLayout(self.then_layout)
@@ -124,11 +129,19 @@ class AdvancedRuleDialog(QDialog):
             
             source = self.source
             print(f"DEBUG: Source for the advanced rule is {source}")
-            if source not in self.parent().thread.reader.advanced_rules:
-                self.parent().thread.reader.advanced_rules[source] = {}
-            self.parent().thread.reader.advanced_rules[source][self.entry_index] = advanced_rule
-            self.parent().thread.reader.save_advanced_rules()
             
+            # Initialize if the source does not exist
+            if source not in self.parent().thread.reader.advanced_rules:
+                self.parent().thread.reader.advanced_rules[source] = []
+            
+            # Remove existing rule for the same entry_index if any
+            self.parent().thread.reader.advanced_rules[source] = [rule for rule in self.parent().thread.reader.advanced_rules[source] if rule["entry_index"] != self.entry_index]
+            
+            # Append the new rule
+            self.parent().thread.reader.advanced_rules[source].append({"entry_index": self.entry_index, "rule": advanced_rule})
+            
+            self.parent().thread.reader.save_advanced_rules()
+            updated_entry_index = int(self.if_combo_box.currentText().split(" ")[-1]) - 1
             self.advancedRuleSet.emit(self.entry_index, advanced_rule_json)
             self.accept()  
             
@@ -140,25 +153,41 @@ class AdvancedRuleDialog(QDialog):
             print(f"DEBUG: self.parent().thread: {self.parent().thread}, type: {type(self.parent().thread)}")
             raise
 
+
+    def populate_fields(self, rule, entry_index):
+        self.entry_index = entry_index
+        self.if_combo_box.setCurrentText(rule.get('if', {}).get('entry', 'Entry 1'))
+        self.if_condition_combo_box.setCurrentText(rule.get('if', {}).get('condition', ''))
+        self.if_value_edit.setText(rule.get('if', {}).get('value', ''))
+        self.then_combo_box.setCurrentText(rule.get('then', {}).get('entry', 'Entry 1'))
+        self.then_action_combo_box.setCurrentText(rule.get('then', {}).get('action', ''))
+
+
+
+
 class FilterSettingsDialog(QDialog):
     def __init__(self, parent=None):
         super(FilterSettingsDialog, self).__init__(parent)
         self.thread = NotificationThread()
+        self.source_list = QListWidget(self)
         layout = QGridLayout()
         layout.addWidget(QLabel("Reading Filter Settings"), 0, 0)
         self.advanced_rules = {}
-        self.setMinimumWidth(700)
-        self.setMinimumHeight(600) 
+        self.setMinimumWidth(900)
+        self.setMinimumHeight(600)
 
         self.rule_table = QTableWidget(0, 3)
         self.rule_table.setHorizontalHeaderLabels(["Rule", "Entries", "Action"])
-        layout.addWidget(self.rule_table, 7, 0, 1, 2)  # Spanning 1 row and 2 columns
         self.rule_table.itemClicked.connect(self.on_rule_clicked)
         #self.rule_table.horizontalHeader().setStretchLastSection(True)
-        #self.rule_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        #self.rule_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)
-        #self.rule_table.verticalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        
+        self.rule_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.rule_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)  # "Rule" column
+        self.rule_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Fixed)    # "Entries" column
+        self.rule_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Fixed)    # "Action" column
+        self.rule_table.setColumnWidth(1, 90)
+        self.rule_table.setColumnWidth(1, 60)
+        self.rule_table.setColumnWidth(2, 52)
+        layout.addWidget(self.rule_table, 7, 0, 1, 2)
 
         # Fields for source and entries
         layout.addWidget(QLabel("Source of notification:"), 1, 0)
@@ -181,7 +210,7 @@ class FilterSettingsDialog(QDialog):
         self.fourth_entry_checkbox = QCheckBox()
         layout.addWidget(self.fourth_entry_checkbox, 5, 1)
 
-         # Add labels to indicate advanced rule
+        # Advanced Rule Labels and Buttons
         self.first_advanced_rule_label = QLabel("Advanced Rule applied")
         self.second_advanced_rule_label = QLabel("Advanced Rule applied")
         self.third_advanced_rule_label = QLabel("Advanced Rule applied")
@@ -195,12 +224,12 @@ class FilterSettingsDialog(QDialog):
         for label in [self.first_advanced_rule_label, self.second_advanced_rule_label, self.third_advanced_rule_label, self.fourth_advanced_rule_label]:
             label.hide()  # Initially hidden
 
-        # Add buttons to open AdvancedRuleDialog
         self.first_advanced_rule_button = QPushButton("Advanced")
         self.second_advanced_rule_button = QPushButton("Advanced")
         self.third_advanced_rule_button = QPushButton("Advanced")
         self.fourth_advanced_rule_button = QPushButton("Advanced")
 
+        # Connect the buttons to the function that shows the AdvancedRuleDialog
         self.first_advanced_rule_button.clicked.connect(lambda: self.show_advanced_rule_dialog_for_filter(0))
         self.second_advanced_rule_button.clicked.connect(lambda: self.show_advanced_rule_dialog_for_filter(1))
         self.third_advanced_rule_button.clicked.connect(lambda: self.show_advanced_rule_dialog_for_filter(2))
@@ -211,23 +240,39 @@ class FilterSettingsDialog(QDialog):
         layout.addWidget(self.third_advanced_rule_button, 4, 3)
         layout.addWidget(self.fourth_advanced_rule_button, 5, 3)
 
-        self.adv_rule_table = QTableWidget(0, 2)
-        self.adv_rule_table.setHorizontalHeaderLabels(["If Condition", "Then Action"])
-        layout.addWidget(self.adv_rule_table, 7, 2, 1, 2)  # Spanning 1 row and 2 columns
+        self.adv_rule_table = QTableWidget(0, 8)
+        self.adv_rule_table.setHorizontalHeaderLabels(["If Entry", "If Condition", "If Value", "Then Action", "Then Entry", "Action value", "Edit", "Delete"])
         self.adv_rule_table.horizontalHeader().setStretchLastSection(True)
-        self.adv_rule_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        self.adv_rule_table.setColumnWidth(0, 120)
-        self.adv_rule_table.setColumnWidth(1, 120)
-        self.adv_rule_table.setMinimumWidth(400)
-        #self.adv_rule_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)
-        #self.adv_rule_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Fixed)
+        self.adv_rule_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.adv_rule_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)  # "If Entry" column
+        self.adv_rule_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)  # "If Condition" column
+        self.adv_rule_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)  # "If Value" column
+        self.adv_rule_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Fixed)  # "Then Action" column
+        self.adv_rule_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Fixed)  # "Then Entry" column
+        self.adv_rule_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.Stretch)  # "Action value" column
+        self.adv_rule_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.Fixed)  # "Edit" column
+        self.adv_rule_table.horizontalHeader().setSectionResizeMode(7, QHeaderView.Fixed)  # "Delete" column
+
+        self.adv_rule_table.setColumnWidth(0, 60) 
+        self.adv_rule_table.setColumnWidth(3, 82) 
+        self.adv_rule_table.setColumnWidth(4, 75)
+        self.adv_rule_table.setColumnWidth(5, 78)
+        self.adv_rule_table.setColumnWidth(6, 52) 
+        self.adv_rule_table.setColumnWidth(7, 52)
+        layout.addWidget(self.adv_rule_table, 7, 2, 1, 2)
 
         self.apply_button = QPushButton('Apply')
         self.apply_button.clicked.connect(self.apply_filter_settings)
-        print("DEBUG: Apply button connected to apply_and_close method.")
         layout.addWidget(self.apply_button, 6, 1)
+        self.adv_rule_table.itemChanged.connect(self.on_adv_rule_item_changed)
+
+        layout.setColumnStretch(0, 1)
+        layout.setColumnStretch(1, 1)
+        layout.setColumnStretch(2, 9)
+        layout.setColumnStretch(3, 9)
 
         self.setLayout(layout)
+
 
     def update_rule_list(self):
         print(f"DEBUG: Current source_rules: {self.parent().thread.reader.source_rules}")  # Debug line
@@ -275,31 +320,83 @@ class FilterSettingsDialog(QDialog):
         self.update_adv_rule_table(source.strip())
         self.update_advanced_rule_labels()
 
-    def update_adv_rule_table(self, source=None):
-        logging.debug(f"FilterSettingsDialog: Updating advanced rule table for source: {source}")  
-        self.adv_rule_table.setRowCount(0)
+    def update_adv_rule_table(self, source):
+        logging.debug("Entering update_adv_rule_table")
+
+        self.adv_rule_table.clearContents()  # Clear the contents
+        self.adv_rule_table.setRowCount(0)  # Set row count to 0
 
         if source and source in self.parent().thread.reader.advanced_rules:
-            logging.debug(f"FilterSettingsDialog: Advanced rules found for source {source}.")  
-            advanced_rules_for_source = self.parent().thread.reader.advanced_rules[source]
-            for idx, (entry_index, rule) in enumerate(advanced_rules_for_source.items()):
-                self.adv_rule_table.insertRow(idx)
-                self.adv_rule_table.setItem(idx, 0, QTableWidgetItem(rule['if']['condition']))
-                self.adv_rule_table.setItem(idx, 1, QTableWidgetItem(rule['then']['action']))
-        else:
-            logging.debug(f"FilterSettingsDialog: No advanced rules found for source {source}.")  
-            self.adv_rule_table.insertRow(0)
-            self.adv_rule_table.setItem(0, 0, QTableWidgetItem("No advanced rules"))
+            advanced_rules = self.parent().thread.reader.advanced_rules[source]
+            for rule_dict in advanced_rules:
+                
+                logging.debug(f"DEBUG: Processing rule_dict: {rule_dict}")  # Debug log
+                
+                entry_index = rule_dict['entry_index']
+                rule = rule_dict['rule']
+                
+                row_position = self.adv_rule_table.rowCount()
+                self.adv_rule_table.insertRow(row_position)
+
+                # Set the "If Entry" based on the 'if' rule
+                if_entry = rule.get('if', {}).get('entry', '')
+                self.adv_rule_table.setItem(row_position, 0, QTableWidgetItem(if_entry))  # Changed this line
+
+                self.adv_rule_table.setItem(row_position, 1, QTableWidgetItem(rule.get('if', {}).get('condition', '')))
+                self.adv_rule_table.setItem(row_position, 2, QTableWidgetItem(rule.get('if', {}).get('value', '')))
+                self.adv_rule_table.setItem(row_position, 3, QTableWidgetItem(rule.get('then', {}).get('action', '')))
+                self.adv_rule_table.setItem(row_position, 4, QTableWidgetItem(rule.get('then', {}).get('entry', '')))
+                self.adv_rule_table.setItem(row_position, 5, QTableWidgetItem(rule.get('then', {}).get('value', '')))
+
+                edit_btn = QPushButton('Edit')
+                edit_btn.clicked.connect(lambda checked, s=source, index=entry_index: self.edit_adv_rule(s, index))
+                self.adv_rule_table.setCellWidget(row_position, 6, edit_btn) 
+
+                delete_btn = QPushButton('Delete')
+                delete_btn.clicked.connect(partial(self.delete_adv_rule, source, entry_index))
+                self.adv_rule_table.setCellWidget(row_position, 7, delete_btn)
+
+        logging.debug("Exiting update_adv_rule_table")  # Debug log at the end
 
 
 
+    def log_and_delete_advanced_rule(self, entry_index):
+        logging.debug(f"Delete button clicked for entry_index {entry_index}")
+        self.delete_advanced_rule(entry_index)  # Assuming you have a method named `delete_advanced_rule`
+
+    def delete_adv_rule(self, source, entry_index):
+        if source in self.parent().thread.reader.advanced_rules:
+            rule_list = self.parent().thread.reader.advanced_rules[source]
+            rule_to_remove = None
+            for r in rule_list:
+                if r["entry_index"] == entry_index:
+                    rule_to_remove = r
+                    break
+
+            if rule_to_remove is not None:
+                rule_list.remove(rule_to_remove)
+                # If the list becomes empty, remove the source entry
+                if not rule_list:
+                    del self.parent().thread.reader.advanced_rules[source]
+                    
+                self.parent().thread.reader.save_advanced_rules()  # Save the updated rules
+                self.update_adv_rule_table(source)  # Refresh the table
+            else:
+                print("DEBUG: No rule found for deletion.")
 
     # Call update_rule_list when the dialog is shown
     def show_and_execute_filter_settings(self):
         self.update_rule_list()
-        self.update_adv_rule_table()
+
+        source = self.source_line_edit.text().strip()  # Getting source from QLineEdit
+        if not source:  # If no source is set, you might set it to None or some default value.
+            source = None  # Or any default source
+
+        self.update_adv_rule_table(source)  # Now providing source as an argument
         self.update_advanced_rule_labels()
+
         super().exec_()
+
 
     def get_settings(self):
         source = self.source_line_edit.text()
@@ -370,19 +467,36 @@ class FilterSettingsDialog(QDialog):
         self.update_advanced_rule_ui()
 
 
-    def set_advanced_rule_for_filter(self, entry_index, advanced_rule):
+    def set_advanced_rule_for_filter(self, entry_index, advanced_rule_json):
         source = self.source_line_edit.text().strip()
         print(f"DEBUG: Source set in FilterSettingsDialog: {source}")
 
         if source not in self.parent().thread.reader.advanced_rules:
-            self.parent().thread.reader.advanced_rules[source] = {}
-        self.parent().thread.reader.advanced_rules[source][entry_index] = json.loads(advanced_rule)
+            self.parent().thread.reader.advanced_rules[source] = []
+        elif not isinstance(self.parent().thread.reader.advanced_rules[source], list):
+            existing_rules = self.parent().thread.reader.advanced_rules[source]
+            self.parent().thread.reader.advanced_rules[source] = [{"entry_index": k, "rule": v} for k, v in existing_rules.items()]
+
+        # Update the advanced rule using the received entry_index
+        for rule in self.parent().thread.reader.advanced_rules[source]:
+            if rule["entry_index"] == entry_index:
+                rule["rule"] = json.loads(advanced_rule_json)
+                break
+        else:
+            self.parent().thread.reader.advanced_rules[source].append({
+                "entry_index": entry_index,
+                "rule": json.loads(advanced_rule_json)
+            })
+
         self.parent().thread.reader.save_advanced_rules()
 
-        self.advanced_rules[entry_index] = advanced_rule
+        # Update the advanced_rules dictionary using the received entry_index
+        self.advanced_rules[entry_index] = advanced_rule_json
+        
         self.update_adv_rule_table(source)
         self.update_advanced_rule_labels()
-        print(f"DEBUG: Updated advanced_rules: {self.advanced_rules}") 
+        print(f"DEBUG: Updated advanced_rules: {self.advanced_rules}")
+
 
     def update_advanced_rule_labels(self):
         if not self.advanced_rules:
@@ -393,6 +507,55 @@ class FilterSettingsDialog(QDialog):
             self.first_advanced_rule_label.show()
         else:
             self.first_advanced_rule_label.hide()
+
+    @pyqtSlot(QTableWidgetItem)
+    def on_adv_rule_item_changed(self, item):
+        row = item.row()
+        column = item.column()
+        new_value = item.text()
+        source = self.source_line_edit.text().strip()
+        
+        # Assuming entry_index is stored in the first column
+        entry_index = self.adv_rule_table.item(row, 0).text()
+        
+        if source in self.parent().thread.reader.advanced_rules:
+            if str(entry_index) in self.parent().thread.reader.advanced_rules[source]:
+                rule = self.parent().thread.reader.advanced_rules[source][entry_index]
+                
+                # Update the rule based on the column that was changed
+                if column == 1:  # 'If Condition'
+                    rule['if']['condition'] = new_value
+                elif column == 2:  # 'If Value'
+                    rule['if']['value'] = new_value
+                elif column == 3:  # 'Then Action'
+                    rule['then']['action'] = new_value
+                    
+                # Save the updated rules
+                self.parent().thread.reader.save_advanced_rules()
+
+    def edit_adv_rule(self, source, entry_index):
+        # Fetch the existing rule data for the specified source and entry_index
+        rule_list = self.parent().thread.reader.advanced_rules.get(source, [])
+        rule = None
+        for r in rule_list:
+            if r["entry_index"] == entry_index:
+                rule = r["rule"]
+                break
+
+        if rule is None:
+            print("DEBUG: No existing rule found for the given source and entry_index.")
+            return
+
+        dialog = AdvancedRuleDialog(self)
+        
+        # Pre-fill the dialog with the existing rule's data
+        dialog.entry_index = entry_index
+        dialog.source = source
+        dialog.populate_fields(rule, entry_index)  # You'll need to implement this method in AdvancedRuleDialog if not already done
+        
+        dialog.advancedRuleSet.connect(self.set_advanced_rule_for_filter)
+        dialog.exec_()
+        self.update_adv_rule_table(source)
 
 
 class App(QWidget):
