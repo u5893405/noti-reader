@@ -8,7 +8,7 @@ There is a simple logic to detect which language of these two is in notification
 
 There is no settings for TTS engines yet, but it will the next thing in development after advanced filters feature. 
 
-Right now the advanced filters in GUI are in the middle of developing, so it doesn't fully work yet.
+Right now the advanced filters in GUI are in the middle of developing, but it partially works already.
 
 required software:
 
