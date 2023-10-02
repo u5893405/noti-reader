@@ -84,34 +84,71 @@ class NotificationReader:
         self.save_advanced_rules()
 
     def apply_advanced_rule(self, sequential_strings, source, actions):
-        logging.debug("DEBUG: Entering apply_advanced_rule.")
+        logging.debug("Entering apply_advanced_rule.")
         
         if source not in self.advanced_rules:
-            logging.debug(f"DEBUG: No advanced rules for source {source}.")
+            logging.debug(f"No advanced rules for source {source}.")
             return  # No rules matched
         
-        logging.debug(f"DEBUG: Advanced rules exist for source {source}. Rules: {self.advanced_rules[source]}")
+        logging.debug(f"Advanced rules exist for source {source}. Rules: {self.advanced_rules[source]}")
         
         for advanced_rule_entry in self.advanced_rules[source]:
             entry_index = advanced_rule_entry["entry_index"]
             advanced_rule = advanced_rule_entry["rule"]
 
-            logging.debug(f"DEBUG: Processing advanced_rule_entry {advanced_rule_entry}")
+            logging.debug(f"Processing advanced_rule_entry {advanced_rule_entry}")
 
             if entry_index < len(sequential_strings):
+                logging.debug(f"entry_index: {entry_index}, len(sequential_strings): {len(sequential_strings)}")
                 text_to_check = sequential_strings[entry_index]
-                logging.debug(f"DEBUG: Checking text {text_to_check} for advanced rules.")
+                logging.debug(f"Checking text {text_to_check} for advanced rules.")
                 
                 if_rule = advanced_rule.get('if', {})
                 condition = if_rule.get('condition', '')
+                logging.debug(f"Condition from advanced rule: {condition}")
+
                 value = if_rule.get('value', '')
 
                 match = False
 
-                if condition == 'contains word':
-                    match = value in text_to_check.split()
-                elif condition == 'contains symbol':
-                    match = value in text_to_check
+                if condition == 'contains words/symbols':
+                    if advanced_rule.get('use_regex', False):
+                        match = re.search(value, text_to_check) is not None
+                    else:
+                        logging.debug(f"value: {value}, text_to_check: {text_to_check}")
+
+                        quoted_terms = re.findall(r'"[^"]+"', value)
+                        unquoted_terms = re.findall(r'\b\w+\b', re.sub(r'"[^"]+"', '', value))
+                        terms = quoted_terms + unquoted_terms
+                        operators = re.findall(r'AND|OR', value)
+
+                        logging.debug(f"quoted_terms: {quoted_terms}, unquoted_terms: {unquoted_terms}, terms: {terms}, operators: {operators}")
+
+                        if not operators:
+                            operators = ['AND'] * (len(terms) - 1)
+
+                        # Initialize a list to store lists of boolean values
+                        grouped_results = [[]]
+
+                        # Check for each term in the text_to_check
+                        for term, op in zip(terms, ['START'] + operators):
+                            term_stripped = term.strip('"')
+                            if term.startswith('"') and term.endswith('"'):
+                                result = term_stripped in text_to_check
+                            else:
+                                result = term_stripped in text_to_check.split()
+                            
+                            if op == 'AND':
+                                grouped_results[-1].append(result)
+                            else:
+                                grouped_results.append([result])
+
+                        # Make sure not to evaluate empty groups
+                        match = any(all(group) for group in grouped_results if group)
+
+                        logging.debug(f"grouped_results: {grouped_results}")
+                        logging.debug(f"match: {match}")
+
                 elif condition == 'is in language':
                     detected_lang = detect(text_to_check)
                     match = detected_lang == value
@@ -119,13 +156,13 @@ class NotificationReader:
                     match = len(text_to_check.split()) == int(value)
                 
                 if match:
-                    logging.debug(f"DEBUG: Condition matched. Processing actions.")
+                    logging.debug(f"Condition matched. Processing actions.")
                     then_rule = advanced_rule.get('then', {})
                     action = then_rule.get('action', '')
                     target_entry_str = then_rule.get('entry', str(entry_index))
                     target_entry_index = int(re.search(r'\d+', target_entry_str).group()) - 1 if re.search(r'\d+', target_entry_str) else entry_index
 
-                    logging.debug(f"DEBUG: Advanced rule match. Action: {action}.")
+                    logging.debug(f"Advanced rule match. Action: {action}.")
                     
                     if action in ['read', 'do not read']:
                         if target_entry_index < len(actions):
@@ -231,7 +268,10 @@ class NotificationReader:
                 for i, action in enumerate(actions):
                     if i < len(sequential_strings):
                         text_to_read = sequential_strings[i]
-                        detected_lang = detect(text_to_read)
+                        if not text_to_read.strip():
+                            logging.debug("Skipping language detection due to empty text.")
+                        else:
+                            detected_lang = detect(text_to_read)
                         lang = 'ru' if detected_lang == 'ru' else 'en'
 
                         if action == 'read':
