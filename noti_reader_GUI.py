@@ -60,13 +60,15 @@ class AdvancedRuleDialog(QDialog):
         self.if_combo_box = QComboBox()
         self.if_combo_box.addItems(["Entry 1", "Entry 2", "Entry 3", "Entry 4"])
         self.if_condition_combo_box = QComboBox()
-        self.if_condition_combo_box.addItems(["contains word", "contains symbol", "is in language", "has this amount of words"])
+        self.if_condition_combo_box.addItems(["contains words/symbols", "is in language", "has this amount of words"])
         self.if_value_edit = QLineEdit()
 
         if_condition_layout = QHBoxLayout()
         if_condition_layout.addWidget(self.if_combo_box)
         if_condition_layout.addWidget(self.if_condition_combo_box)
         if_condition_layout.addWidget(self.if_value_edit)
+        self.regex_checkbox = QCheckBox("Use Regex")
+        if_condition_layout.addWidget(self.regex_checkbox)
         self.if_label = QLabel("Condition:")
         self.if_layout.addWidget(self.if_label)
 
@@ -118,7 +120,11 @@ class AdvancedRuleDialog(QDialog):
                 "value": self.then_value_edit.text()
             }
 
-            advanced_rule = {"if": if_rule, "then": then_rule}
+            advanced_rule = {
+                "if": if_rule,
+                "then": then_rule,
+                "use_regex": self.regex_checkbox.isChecked()
+            }
             advanced_rule_json = json.dumps(advanced_rule)
             
             # Debug line
@@ -181,7 +187,7 @@ class FilterSettingsDialog(QDialog):
         self.rule_table.itemClicked.connect(self.on_rule_clicked)
         #self.rule_table.horizontalHeader().setStretchLastSection(True)
         self.rule_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.rule_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)  # "Rule" column
+        self.rule_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)  # "Rule" column
         self.rule_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Fixed)    # "Entries" column
         self.rule_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Fixed)    # "Action" column
         self.rule_table.setColumnWidth(1, 90)
