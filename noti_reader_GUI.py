@@ -1,4 +1,4 @@
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QPushButton, QLabel, QSlider, QFormLayout, QLineEdit, QCheckBox, QDialog, QGridLayout, QTableWidgetItem, QTableWidget, QHeaderView, QComboBox, QHBoxLayout, QSplitter, QListWidget
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QPushButton, QLabel, QSlider, QFormLayout, QLineEdit, QCheckBox, QDialog, QGridLayout, QTableWidgetItem, QTableWidget, QHeaderView, QComboBox, QHBoxLayout, QSplitter, QListWidget, QSizePolicy
 from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot, QThread
 from functools import partial
 import sys
@@ -60,7 +60,7 @@ class AdvancedRuleDialog(QDialog):
         self.if_combo_box = QComboBox()
         self.if_combo_box.addItems(["Entry 1", "Entry 2", "Entry 3", "Entry 4"])
         self.if_condition_combo_box = QComboBox()
-        self.if_condition_combo_box.addItems(["contains words/symbols", "is in language", "has this amount of words"])
+        self.if_condition_combo_box.addItems(["contains words/symbols", "does not contain words/symbols", "is in language", "has this amount of words"])
         self.if_value_edit = QLineEdit()
 
         if_condition_layout = QHBoxLayout()
@@ -165,8 +165,11 @@ class AdvancedRuleDialog(QDialog):
         self.if_combo_box.setCurrentText(rule.get('if', {}).get('entry', 'Entry 1'))
         self.if_condition_combo_box.setCurrentText(rule.get('if', {}).get('condition', ''))
         self.if_value_edit.setText(rule.get('if', {}).get('value', ''))
+        self.regex_checkbox.setChecked(rule.get('use_regex', False))
         self.then_combo_box.setCurrentText(rule.get('then', {}).get('entry', 'Entry 1'))
         self.then_action_combo_box.setCurrentText(rule.get('then', {}).get('action', ''))
+        self.then_value_edit.setText(rule.get('then', {}).get('value', ''))
+
 
 
 
@@ -198,6 +201,9 @@ class FilterSettingsDialog(QDialog):
         # Fields for source and entries
         layout.addWidget(QLabel("Source of notification:"), 1, 0)
         self.source_line_edit = QLineEdit()
+        self.source_line_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.source_line_edit.setMaximumWidth(600)  # set a sensible maximum width
+        self.source_line_edit.setMinimumWidth(230) 
         layout.addWidget(self.source_line_edit, 1, 1)
 
         layout.addWidget(QLabel("First entry (notification source name):"), 2, 0)
@@ -301,9 +307,10 @@ class FilterSettingsDialog(QDialog):
             self.rule_table.setCellWidget(row_position, 2, delete_button)  
 
     def delete_rule(self, source):
-        del self.parent().thread.reader.source_rules[source]
-        self.parent().thread.reader.update_rules({})
-        self.update_rule_list()
+        if source != DEFAULT_SOURCE:  # Prevent deletion of the default entry
+            del self.parent().thread.reader.source_rules[source]
+            self.parent().thread.reader.update_rules({})
+            self.update_rule_list()
 
     @pyqtSlot(QTableWidgetItem)
     def on_rule_clicked(self, item):
@@ -361,6 +368,10 @@ class FilterSettingsDialog(QDialog):
                 delete_btn = QPushButton('Delete')
                 delete_btn.clicked.connect(partial(self.delete_adv_rule, source, entry_index))
                 self.adv_rule_table.setCellWidget(row_position, 7, delete_btn)
+
+                self.adv_rule_table.resizeColumnToContents(1) 
+                self.adv_rule_table.resizeColumnToContents(3)
+
 
         logging.debug("Exiting update_adv_rule_table")  # Debug log at the end
 
@@ -468,6 +479,10 @@ class FilterSettingsDialog(QDialog):
         dialog.entry_index = entry_index
         dialog.source = source
         print(f"DEBUG: dialog.source set to: {dialog.source}")  # Debug log 2
+        initial_entry_text = f"Entry {entry_index + 1}"
+        dialog.if_combo_box.setCurrentText(initial_entry_text)
+        dialog.then_combo_box.setCurrentText(initial_entry_text)
+
         dialog.advancedRuleSet.connect(self.set_advanced_rule_for_filter)
         dialog.exec_()
         self.update_advanced_rule_ui()
