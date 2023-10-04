@@ -28,6 +28,7 @@ if not logger.hasHandlers():
 from omegaconf import OmegaConf
 from langdetect import detect
 from scipy.io.wavfile import write
+DEFAULT_SOURCE = 'Default - all notifications'
 
 
 class NotificationReader:
@@ -60,18 +61,25 @@ class NotificationReader:
         self.max_recent_notifications = 10
         self.running = False
         self.callback = callback
+        
     def load_rules(self):
         try:
-            with open(self.json_path, 'r') as f:  # Use absolute path
+            with open(self.json_path, 'r') as f:
                 self.source_rules = json.load(f)
+                if DEFAULT_SOURCE not in self.source_rules:
+                    self.source_rules[DEFAULT_SOURCE] = [0, 1]  # Defaults to reading the first two entries
+                    self.update_rules({})
         except FileNotFoundError:
-            self.source_rules = {}
-            print("DEBUG: source_rules.json not found, initializing empty rules.")
-            logging.exception("source_rules.json not found, initializing empty rules.")    
+            self.source_rules = {DEFAULT_SOURCE: [0, 1]}  # Defaults to reading the first two entries
+            logging.debug("source_rules.json not found, initializing with default rules.")
 
     def update_rules(self, new_rules):
+        # Prevent deletion of the default entry
+        if DEFAULT_SOURCE in self.source_rules and DEFAULT_SOURCE not in new_rules:
+            new_rules[DEFAULT_SOURCE] = self.source_rules[DEFAULT_SOURCE]
+        
         self.source_rules.update(new_rules)
-        with open(self.json_path, 'w') as f:  # Use absolute path
+        with open(self.json_path, 'w') as f:
             json.dump(self.source_rules, f)
         logging.debug(f"Updated rules saved to {self.json_path}")
 
@@ -85,13 +93,13 @@ class NotificationReader:
 
     def apply_advanced_rule(self, sequential_strings, source, actions):
         logging.debug("Entering apply_advanced_rule.")
-        
+
         if source not in self.advanced_rules:
             logging.debug(f"No advanced rules for source {source}.")
             return  # No rules matched
-        
+
         logging.debug(f"Advanced rules exist for source {source}. Rules: {self.advanced_rules[source]}")
-        
+
         for advanced_rule_entry in self.advanced_rules[source]:
             entry_index = advanced_rule_entry["entry_index"]
             advanced_rule = advanced_rule_entry["rule"]
@@ -102,59 +110,65 @@ class NotificationReader:
                 logging.debug(f"entry_index: {entry_index}, len(sequential_strings): {len(sequential_strings)}")
                 text_to_check = sequential_strings[entry_index]
                 logging.debug(f"Checking text {text_to_check} for advanced rules.")
-                
+
                 if_rule = advanced_rule.get('if', {})
                 condition = if_rule.get('condition', '')
                 logging.debug(f"Condition from advanced rule: {condition}")
 
                 value = if_rule.get('value', '')
-
                 match = False
 
                 if condition == 'contains words/symbols':
                     if advanced_rule.get('use_regex', False):
                         match = re.search(value, text_to_check) is not None
                     else:
-                        logging.debug(f"value: {value}, text_to_check: {text_to_check}")
-
                         quoted_terms = re.findall(r'"[^"]+"', value)
                         unquoted_terms = re.findall(r'\b\w+\b', re.sub(r'"[^"]+"', '', value))
                         terms = quoted_terms + unquoted_terms
                         operators = re.findall(r'AND|OR', value)
 
-                        logging.debug(f"quoted_terms: {quoted_terms}, unquoted_terms: {unquoted_terms}, terms: {terms}, operators: {operators}")
+                        if not operators:
+                            operators = ['AND'] * (len(terms) - 1)
+
+                        grouped_results = []
+                        for i, term in enumerate(terms):
+                            if term.startswith('"') and term.endswith('"'):
+                                term = term.strip('"')
+                                grouped_results.append(term in text_to_check)
+                            else:
+                                grouped_results.append(term in text_to_check.split())
+
+                        match = any(grouped_results) if 'OR' in operators else all(grouped_results)
+
+                elif condition == 'does not contain words/symbols':
+                    if advanced_rule.get('use_regex', False):
+                        match = re.search(value, text_to_check) is None
+                    else:
+                        quoted_terms = re.findall(r'"[^"]+"', value)
+                        unquoted_terms = re.findall(r'\b\w+\b', re.sub(r'"[^"]+"', '', value))
+                        terms = quoted_terms + unquoted_terms
+                        operators = re.findall(r'AND|OR', value)
 
                         if not operators:
                             operators = ['AND'] * (len(terms) - 1)
 
-                        # Initialize a list to store lists of boolean values
-                        grouped_results = [[]]
-
-                        # Check for each term in the text_to_check
-                        for term, op in zip(terms, ['START'] + operators):
-                            term_stripped = term.strip('"')
+                        grouped_results = []
+                        for i, term in enumerate(terms):
                             if term.startswith('"') and term.endswith('"'):
-                                result = term_stripped in text_to_check
+                                term = term.strip('"')
+                                grouped_results.append(term not in text_to_check)
                             else:
-                                result = term_stripped in text_to_check.split()
-                            
-                            if op == 'AND':
-                                grouped_results[-1].append(result)
-                            else:
-                                grouped_results.append([result])
+                                grouped_results.append(term not in text_to_check.split())
 
-                        # Make sure not to evaluate empty groups
-                        match = any(all(group) for group in grouped_results if group)
-
-                        logging.debug(f"grouped_results: {grouped_results}")
-                        logging.debug(f"match: {match}")
+                        match = any(grouped_results) if 'OR' in operators else all(grouped_results)
 
                 elif condition == 'is in language':
                     detected_lang = detect(text_to_check)
                     match = detected_lang == value
+
                 elif condition == 'has this amount of words':
                     match = len(text_to_check.split()) == int(value)
-                
+
                 if match:
                     logging.debug(f"Condition matched. Processing actions.")
                     then_rule = advanced_rule.get('then', {})
@@ -162,8 +176,6 @@ class NotificationReader:
                     target_entry_str = then_rule.get('entry', str(entry_index))
                     target_entry_index = int(re.search(r'\d+', target_entry_str).group()) - 1 if re.search(r'\d+', target_entry_str) else entry_index
 
-                    logging.debug(f"Advanced rule match. Action: {action}.")
-                    
                     if action in ['read', 'do not read']:
                         if target_entry_index < len(actions):
                             actions[target_entry_index] = action
@@ -172,6 +184,9 @@ class NotificationReader:
                         if target_entry_index < len(sequential_strings):
                             sequential_strings[target_entry_index] = replacement_words
                             actions[target_entry_index] = 'read'
+                else:
+                    logging.debug(f"Condition not matched. Skipping actions.")
+
         return actions
 
     def start(self):
